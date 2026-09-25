@@ -1,0 +1,38 @@
+{
+  "name": "game-design-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A friendly AI game design helper with a free built-in AI. Runs entirely in your browser: no account, no key.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build-web.mjs --serve",
+    "build": "node scripts/build-web.mjs",
+    "preview": "node scripts/build-web.mjs --serve --once",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "demo:build": "node scripts/build-demo.mjs",
+    "eval:cases": "tsx scripts/clerk-eval-cases.ts",
+    "eval:check": "tsx scripts/clerk-eval-check.ts",
+    "mock-model": "node scripts/mock-openai-server.mjs"
+  },
+  "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.85",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}
