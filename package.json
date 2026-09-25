@@ -1,6 +1,6 @@
 {
   "name": "game-design-copilot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "A friendly AI game design helper with a free built-in AI. Runs entirely in your browser: no account, no key.",
   "type": "module",

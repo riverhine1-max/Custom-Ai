@@ -61,6 +61,41 @@ describe("built-in AI", () => {
     expect(await p.generate({ purpose: "reply", system: "", messages: [{ role: "user", content: "x" }] })).toBe("from test");
   });
 
+  it("restarts by itself when the graphics chip drops the model", async () => {
+    let calls = 0;
+    (globalThis as Hook).__GDC_TEST_ENGINE__ = {
+      generate: async () => {
+        calls++;
+        if (calls === 1) {
+          const e = new Error("Model not loaded before trying to complete ChatCompletionRequest.");
+          e.name = "ModelNotLoadedError";
+          throw e;
+        }
+        return "back again";
+      },
+    };
+    const p = new BuiltInProvider({ size: "balanced", workerUrl: null });
+    const phases: string[] = [];
+    p.subscribe((s) => phases.push(s.phase));
+    expect(await p.generate({ purpose: "reply", system: "", messages: [{ role: "user", content: "x" }] })).toBe("back again");
+    expect(calls).toBe(2);
+    expect(phases).toContain("loading");
+  });
+
+  it("explains in plain words and suggests Light when it keeps running out of graphics memory", async () => {
+    (globalThis as Hook).__GDC_TEST_ENGINE__ = {
+      generate: async () => {
+        throw new Error("Ludomuse had a problem: ModelNotLoadedError: Model not loaded before trying to complete ChatCompletionRequest.");
+      },
+    };
+    const p = new BuiltInProvider({ size: "balanced", workerUrl: null });
+    const err = await p.generate({ purpose: "reply", system: "", messages: [{ role: "user", content: "x" }] }).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/ran out of graphics memory/);
+    expect((err as Error).message).toMatch(/choose Light/);
+    expect((err as Error).message).not.toMatch(/MLCEngine/);
+    expect(p.status.phase).toBe("error");
+  });
+
   it("hides the model's private thinking", () => {
     expect(stripThinking("<think>hmm</think>\n\nAnswer")).toBe("Answer");
     expect(stripThinking("Partial <think>still thinking")).toBe("Partial ");

@@ -34,7 +34,7 @@ export class WebLlmEngine {
   readonly kind = "webllm" as const;
   private queue: Promise<unknown> = Promise.resolve();
 
-  private constructor(private engine: Engine, readonly modelId: string) {}
+  private constructor(private engine: Engine, readonly modelId: string, private worker: Worker | null) {}
 
   /** Download (first time) and load the model. `workerUrl` is the bundled worker script. */
   static async create(size: BuiltInSize, f16: boolean, workerUrl: string | null, onProgress: (p: Progress) => void): Promise<WebLlmEngine> {
@@ -44,15 +44,29 @@ export class WebLlmEngine {
       onProgress({ progress: r.progress, downloading: /fetch|download/i.test(r.text) && r.progress < 1, text: r.text });
     };
     let engine: Engine;
+    let worker: Worker | null = null;
     try {
       if (!workerUrl || typeof Worker === "undefined") throw new Error("no worker");
-      const worker = new Worker(new URL(workerUrl, document.baseURI), { type: "module" });
+      worker = new Worker(new URL(workerUrl, document.baseURI), { type: "module" });
       engine = await webllm.CreateWebWorkerMLCEngine(worker, modelId, { initProgressCallback }, { context_window_size: 4096 });
     } catch (e) {
+      worker?.terminate();
+      worker = null;
       if ((e as Error)?.message !== "no worker") console.warn("[Ludomuse] worker failed, running on the page instead", e);
       engine = await webllm.CreateMLCEngine(modelId, { initProgressCallback }, { context_window_size: 4096 });
     }
-    return new WebLlmEngine(engine, modelId);
+    return new WebLlmEngine(engine, modelId, worker);
+  }
+
+  /** Free the graphics memory and stop the background worker. */
+  async dispose(): Promise<void> {
+    try {
+      await Promise.race([this.engine.unload(), new Promise((r) => setTimeout(r, 3000))]);
+    } catch {
+      /* the model may already be gone */
+    }
+    this.worker?.terminate();
+    this.worker = null;
   }
 
   static async isDownloaded(size: BuiltInSize, f16: boolean): Promise<boolean> {
@@ -101,7 +115,9 @@ export class WebLlmEngine {
       }
     } catch (e) {
       if (req.signal?.aborted) throw new Error("Stopped.");
-      throw new Error(`Ludomuse had a problem: ${(e as Error)?.message ?? e}`);
+      const err = new Error(`Ludomuse had a problem: ${(e as Error)?.message ?? e}`);
+      err.name = (e as Error)?.name ?? "Error";
+      throw err;
     } finally {
       req.signal?.removeEventListener("abort", stop);
     }

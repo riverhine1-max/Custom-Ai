@@ -18,6 +18,24 @@ export { stripThinking } from "./webllm";
 interface Engine {
   kind: "chrome" | "webllm" | "test";
   generate(req: GenerateRequest): Promise<string>;
+  /** Free the graphics memory (and the background worker). */
+  dispose?(): Promise<void>;
+}
+
+/**
+ * The graphics chip can drop the model mid-session, usually because it ran out
+ * of memory (other games or tabs, a big model on a small chip, the laptop
+ * sleeping). WebLLM then reports "model not loaded" on the next request.
+ */
+export function isEngineLost(e: unknown): boolean {
+  const m = `${(e as Error)?.name ?? ""} ${(e as Error)?.message ?? e}`;
+  return /ModelNotLoaded|Model not loaded|device (was )?lost|DeviceLost|GPU.*lost|Instance reference no longer exists/i.test(m);
+}
+
+export function lostMessage(size: BuiltInSize): string {
+  return size === "light"
+    ? "Ludomuse ran out of graphics memory on this computer, even at the Light size. Close games or heavy browser tabs and try again, or switch to ChatGPT or Claude in AI settings."
+    : "Ludomuse ran out of graphics memory on this computer. Open AI settings (bottom-left) and choose Light: it's smaller and fits more computers. Closing games or heavy tabs helps too.";
 }
 
 /** Tests can install a fake engine here instead of downloading a real model. */
@@ -64,7 +82,36 @@ export class BuiltInProvider implements ModelProvider {
 
   async generate(req: GenerateRequest): Promise<string> {
     const engine = await this.ensure();
-    return engine.generate(req);
+    try {
+      return await engine.generate(req);
+    } catch (e) {
+      if (!isEngineLost(e)) throw e;
+    }
+    // The model was dropped: start it again once, with a fresh worker.
+    await this.reset();
+    this.set({ phase: "loading", engine: "webllm", message: "Ludomuse lost its graphics memory. Restarting it…" });
+    try {
+      const again = await this.ensure();
+      return await again.generate(req);
+    } catch (e) {
+      if (!isEngineLost(e)) throw e;
+      await this.reset();
+      const msg = lostMessage(this.opts.size);
+      this.set({ phase: "error", engine: "webllm", message: msg });
+      throw new Error(msg);
+    }
+  }
+
+  /** Throw away the current engine and free its memory. */
+  private async reset(): Promise<void> {
+    const old = this.engine;
+    this.engine = null;
+    this.loading = null;
+    try {
+      await old?.dispose?.();
+    } catch {
+      /* already gone */
+    }
   }
 
   async isDownloaded(): Promise<boolean> {
@@ -75,8 +122,8 @@ export class BuiltInProvider implements ModelProvider {
 
   async removeDownload(): Promise<void> {
     const { f16 } = await checkWebGPU();
+    await this.reset();
     await WebLlmEngine.removeDownload(this.opts.size, f16);
-    this.engine = null;
     this.set({ phase: "idle", message: "Removed. It will download again the next time you use it." });
   }
 
@@ -138,17 +185,17 @@ export class BuiltInProvider implements ModelProvider {
       this.set({ phase: "ready", engine: "webllm", progress: 1, message: `Ludomuse ready (${model.label}). It runs on this device.` });
       return engine;
     } catch (e) {
-      const msg = friendlyLoadError(e);
+      const msg = friendlyLoadError(e, this.opts.size);
       this.set({ phase: "error", engine: "webllm", message: msg });
       throw new Error(msg);
     }
   }
 }
 
-function friendlyLoadError(e: unknown): string {
+function friendlyLoadError(e: unknown, size: BuiltInSize): string {
   const m = String((e as Error)?.message ?? e);
   if (/quota|storage|space/i.test(m)) return "There isn't enough free space to store Ludomuse. Free up some disk space, or pick the Light size in AI settings.";
-  if (/memory|out of|device (was )?lost|OOM/i.test(m)) return "This device ran out of graphics memory. Pick the Light size in AI settings and try again.";
+  if (/memory|out of|device (was )?lost|OOM|ModelNotLoaded/i.test(m)) return lostMessage(size);
   if (/fetch|network|Failed to fetch|load failed/i.test(m)) return "Ludomuse couldn't download. Check your internet connection and try again (it's only needed the first time).";
   return `Ludomuse couldn't start: ${m}`;
 }
