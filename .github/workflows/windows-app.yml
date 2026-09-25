@@ -1,0 +1,33 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npm run desktop:win
+      - name: Read the app version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: Game Design Copilot ${{ steps.version.outputs.value }}
+          make_latest: true
+          files: release/Game-Design-Copilot-Windows.zip
+          body: |
+            **Windows:** download `Game-Design-Copilot-Windows.zip`, unzip it, and double-click `Game Design Copilot.exe`.
+            If Windows warns you, click **More info → Run anyway**.
